@@ -1,0 +1,12 @@
+../Core/Src/main.c:33:5:_write	4
+../Core/Src/main.c:43:6:trace_toggle	4
+../Core/Src/main.c:53:6:trace_on	4
+../Core/Src/main.c:63:6:trace_off	4
+../Core/Src/main.c:84:5:main	1
+../Core/Src/main.c:102:6:led_task_1	1
+../Core/Src/main.c:113:6:led_task_2	1
+../Core/Src/main.c:121:6:SystemClock_Config	3
+../Core/Src/main.c:156:13:MX_USART1_UART_Init	2
+../Core/Src/main.c:184:13:MX_GPIO_Init	1
+../Core/Src/main.c:219:6:HAL_TIM_PeriodElapsedCallback	2
+../Core/Src/main.c:232:6:Error_Handler	1
