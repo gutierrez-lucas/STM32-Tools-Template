@@ -124,6 +124,8 @@ void display_task(void *pvParameters){
 
 				SSD1306_Clear();
 				vTaskPrioritySet(xButton_task_handle, tskIDLE_PRIORITY+3);
+				// xTaskNotifyGive(xButton_task_handle);
+				xTaskNotify(xButton_task_handle, 0xffff, eSetValueWithOverwrite);
 			}
 		}else{
 			xQueueReceive(button_queue, &button_res, 0);
@@ -171,6 +173,13 @@ void display_task(void *pvParameters){
 }
 
 void button_task(void *pvParameters){
+
+	printf("Button task started, waiting for display ready\r\n");
+	// ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+	uint32_t notification_message = 42;
+	xTaskNotifyWait(0, 0, &notification_message, portMAX_DELAY);
+
+	printf("Display ready, starting button task, message: 0x%04X\r\n", notification_message);
 
 	uint8_t button_left_var = 0, button_right_var = 0, button_up_var = 0, button_down_var = 0;
 	button_t current_button = UNPRESS;
