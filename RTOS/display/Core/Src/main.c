@@ -62,7 +62,8 @@ void trace_off(int tag){
 
 void display_task(void *pvParameters);
 void button_task(void *pvParameters);
-xTaskHandle xbutton_task_handle = NULL;
+xTaskHandle xButton_task_handle = NULL;
+xTaskHandle xDisplay_task_handle = NULL;
 
 void SystemClock_Config(void);
 
@@ -88,8 +89,11 @@ int main(void)
 
 	button_queue = xQueueCreate(20, sizeof(button_t));
 
-	xTaskCreate(display_task, "display_task", 128, NULL, tskIDLE_PRIORITY+2, NULL);
-	xTaskCreate(button_task, "button_task", 128, NULL, tskIDLE_PRIORITY+1, &xbutton_task_handle);
+	xTaskCreate(display_task, "display_task", 128, NULL, tskIDLE_PRIORITY+2, &xDisplay_task_handle);
+	xTaskCreate(button_task, "button_task", 128, NULL, tskIDLE_PRIORITY+1, &xButton_task_handle);
+
+	vTaskSetApplicationTaskTag( xDisplay_task_handle, ( void * ) 1 );
+	vTaskSetApplicationTaskTag( xButton_task_handle, ( void * ) 2 );
 
 	vTaskStartScheduler();
 
@@ -99,33 +103,27 @@ int main(void)
 
 
 void display_task(void *pvParameters){
-	vTaskSetApplicationTaskTag( NULL, ( void * ) 1 );
+
 	TickType_t xLastWakeTime = xTaskGetTickCount();
+
 	static int connected = 0;
-	HAL_StatusTypeDef res;
-	int i = 0 ;
+
 	button_t button_res = 0;	
 	uint8_t position_x = 10;
 	uint8_t position_y = 10;
 
 	while(1){
 		if(connected == 0){
-			res = SSD1306_Init(0x78); 
+			HAL_StatusTypeDef res = SSD1306_Init(0x78); 
 			if( res != HAL_OK){
-				printf("Display connection err: %d, with addr 0x%02X  \r\n", res, i);
+				printf("Display connection err: %d\r\n", res);
 			}else{
 				HAL_GPIO_WritePin(main_led_GPIO_Port, main_led_Pin, SET);
 				connected = 1;
-				printf("Display connected with addr 0x%02X \\r\n", i);
+				printf("Display connected.\r\n" );
 
-				// SSD1306_GotoXY (10,10); // goto 10, 10 
-				// SSD1306_Puts ("HELLO", &Font_11x18, 1); // print Hello 
-				// SSD1306_GotoXY (10, 30); 
-				// SSD1306_Puts ("WORLD !!", &Font_11x18, 1); 
-				// SSD1306_UpdateScreen(); // update screen
-				// printf("display done\r\n");
 				SSD1306_Clear();
-				vTaskPrioritySet(xbutton_task_handle, tskIDLE_PRIORITY+3);
+				vTaskPrioritySet(xButton_task_handle, tskIDLE_PRIORITY+3);
 			}
 		}else{
 			xQueueReceive(button_queue, &button_res, 0);
@@ -168,12 +166,12 @@ void display_task(void *pvParameters){
 		}
 		vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(500));
 	}
-	printf("Destroying task 1 \r\n");
-	vTaskDelete(NULL);
+	printf("Destroying Display task 1 \r\n");
+	vTaskDelete(xDisplay_task_handle);
 }
 
 void button_task(void *pvParameters){
-	vTaskSetApplicationTaskTag( NULL, ( void * ) 2 );
+
 	uint8_t button_left_var = 0, button_right_var = 0, button_up_var = 0, button_down_var = 0;
 	button_t current_button = UNPRESS;
 
@@ -230,6 +228,8 @@ void button_task(void *pvParameters){
 	
 		vTaskDelay(50/ portTICK_PERIOD_MS);
 	}
+	printf("Destroying Button task \r\n");
+	vTaskDelete(xButton_task_handle);
 }
 
 void SystemClock_Config(void)
