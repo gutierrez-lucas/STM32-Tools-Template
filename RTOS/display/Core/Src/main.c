@@ -15,6 +15,14 @@
 
 #include "../display/ssd1306.h"
 
+typedef enum {
+	LEFT = 1,
+	RIGHT = 2,
+	UP = 4,
+	DOWN = 5,
+	UNPRESS = 0
+} button_t;
+
 I2C_HandleTypeDef hi2c2;
 UART_HandleTypeDef huart1;
 
@@ -54,15 +62,10 @@ void trace_off(int tag){
 
 void display_task(void *pvParameters);
 void button_task(void *pvParameters);
+xTaskHandle xbutton_task_handle = NULL;
 
-
-/* USER CODE BEGIN PV */
-
-
-/* USER CODE END PV */
-
-/* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
+
 static void MX_GPIO_Init(void);
 static void MX_I2C2_Init(void);
 static void MX_USART1_UART_Init(void);
@@ -83,10 +86,10 @@ int main(void)
 
 	printf("\r\n\r\nDisplay Test\r\n");
 
-	button_queue = xQueueCreate(10, sizeof(uint8_t));
+	button_queue = xQueueCreate(20, sizeof(button_t));
 
 	xTaskCreate(display_task, "display_task", 128, NULL, tskIDLE_PRIORITY+2, NULL);
-	xTaskCreate(button_task, "button_task", 128, NULL, tskIDLE_PRIORITY+1, NULL);
+	xTaskCreate(button_task, "button_task", 128, NULL, tskIDLE_PRIORITY+1, &xbutton_task_handle);
 
 	vTaskStartScheduler();
 
@@ -101,7 +104,7 @@ void display_task(void *pvParameters){
 	static int connected = 0;
 	HAL_StatusTypeDef res;
 	int i = 0 ;
-	uint8_t button_res = 0;	
+	button_t button_res = 0;	
 	uint8_t position_x = 10;
 	uint8_t position_y = 10;
 
@@ -122,25 +125,26 @@ void display_task(void *pvParameters){
 				// SSD1306_UpdateScreen(); // update screen
 				// printf("display done\r\n");
 				SSD1306_Clear();
+				vTaskPrioritySet(xbutton_task_handle, tskIDLE_PRIORITY+3);
 			}
 		}else{
 			xQueueReceive(button_queue, &button_res, 0);
 			while(button_res != 0){
 				SSD1306_GotoXY (position_x,position_y); 
 				switch(button_res){
-					case(0b00001000):
+					case(LEFT):
 						printf("Button left pressed \r\n");
 						SSD1306_Puts ("L", &Font_11x18, 1); 
 						break;
-					case(0b00000001):
+					case(RIGHT):
 						printf("Button right pressed \r\n");
 						SSD1306_Puts ("R", &Font_11x18, 1);
 						break;
-					case(0b00000100):
+					case(UP):
 						printf("Button up pressed \r\n");
 						SSD1306_Puts ("U", &Font_11x18, 1); 
 						break;
-					case(0b00000010):
+					case(DOWN):
 						printf("Button down pressed \r\n");
 						SSD1306_Puts ("D", &Font_11x18, 1); 
 						break;
@@ -162,7 +166,7 @@ void display_task(void *pvParameters){
 				xQueueReceive(button_queue, &button_res, 0);
 			}
 		}
-		vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(250));
+		vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(500));
 	}
 	printf("Destroying task 1 \r\n");
 	vTaskDelete(NULL);
@@ -170,28 +174,61 @@ void display_task(void *pvParameters){
 
 void button_task(void *pvParameters){
 	vTaskSetApplicationTaskTag( NULL, ( void * ) 2 );
-	uint8_t button_bin = 0;
-	while(1){
-		HAL_GPIO_TogglePin(sec_led_GPIO_Port, sec_led_Pin);
+	uint8_t button_left_var = 0, button_right_var = 0, button_up_var = 0, button_down_var = 0;
+	button_t current_button = UNPRESS;
 
-		if(HAL_GPIO_ReadPin(button_l_GPIO_Port, button_l_Pin) == GPIO_PIN_RESET){
-			button_bin = 0b00001000;
-			xQueueSend(button_queue, &button_bin, 0);
+	while(1){
+		// HAL_GPIO_TogglePin(sec_led_GPIO_Port, sec_led_Pin);
+
+		if(button_left_var == 1){
+			if(HAL_GPIO_ReadPin(button_l_GPIO_Port, button_l_Pin) == GPIO_PIN_SET){
+				button_left_var = 0;
+				current_button = LEFT;
+				xQueueSend(button_queue, &current_button, 0);
+			}
+		}else{
+			if(HAL_GPIO_ReadPin(button_l_GPIO_Port, button_l_Pin) == GPIO_PIN_RESET){
+				button_left_var = 1;
+			}
 		}
-		if(HAL_GPIO_ReadPin(button_r_GPIO_Port, button_r_Pin) == GPIO_PIN_RESET){
-			xQueueSend(button_queue, &button_bin, 0);
-			button_bin = 0b00000001;
+
+		if(button_right_var == 1){
+			if(HAL_GPIO_ReadPin(button_r_GPIO_Port, button_r_Pin) == GPIO_PIN_SET){
+				button_right_var = 0;
+				current_button = RIGHT;
+				xQueueSend(button_queue, &current_button, 0);
+			}
+		}else{
+			if(HAL_GPIO_ReadPin(button_r_GPIO_Port, button_r_Pin) == GPIO_PIN_RESET){
+				button_right_var = 1;
+			}
 		}
-		if(HAL_GPIO_ReadPin(button_u_GPIO_Port, button_u_Pin) == GPIO_PIN_RESET){
-			xQueueSend(button_queue, &button_bin, 0);
-			button_bin = 0b00000100;
+
+		if(button_up_var == 1){
+			if(HAL_GPIO_ReadPin(button_u_GPIO_Port, button_u_Pin) == GPIO_PIN_SET){
+				button_up_var = 0;
+				current_button = UP;
+				xQueueSend(button_queue, &current_button, 0);
+			}
+		}else{
+			if(HAL_GPIO_ReadPin(button_u_GPIO_Port, button_u_Pin) == GPIO_PIN_RESET){
+				button_up_var = 1;
+			}
 		}
-		if(HAL_GPIO_ReadPin(button_d_GPIO_Port, button_d_Pin) == GPIO_PIN_RESET){
-			xQueueSend(button_queue, &button_bin, 0);
-			button_bin = 0b00000010;
+
+		if(button_down_var == 1){
+			if(HAL_GPIO_ReadPin(button_d_GPIO_Port, button_d_Pin) == GPIO_PIN_SET){
+				button_down_var = 0;
+				current_button = DOWN;
+				xQueueSend(button_queue, &current_button, 0);
+			}
+		}else{
+			if(HAL_GPIO_ReadPin(button_d_GPIO_Port, button_d_Pin) == GPIO_PIN_RESET){
+				button_down_var = 1;
+			}
 		}
 	
-		vTaskDelay(100/ portTICK_PERIOD_MS);
+		vTaskDelay(50/ portTICK_PERIOD_MS);
 	}
 }
 
