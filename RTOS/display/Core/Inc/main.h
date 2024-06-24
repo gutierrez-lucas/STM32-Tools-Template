@@ -57,6 +57,8 @@ void Error_Handler(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
+#define display_reset_Pin GPIO_PIN_3
+#define display_reset_Port GPIOB
 #define main_led_Pin GPIO_PIN_13
 #define main_led_GPIO_Port GPIOB
 #define sec_led_Pin GPIO_PIN_14
@@ -67,6 +69,15 @@ void Error_Handler(void);
 #define trace_1_GPIO_Port GPIOA
 #define trace_2_Pin GPIO_PIN_10
 #define trace_2_GPIO_Port GPIOA
+
+#define button_r_Pin GPIO_PIN_5
+#define button_r_GPIO_Port GPIOB
+#define button_l_Pin GPIO_PIN_15
+#define button_l_GPIO_Port GPIOA
+#define button_u_Pin GPIO_PIN_11
+#define button_u_GPIO_Port GPIOA
+#define button_d_Pin GPIO_PIN_8
+#define button_d_GPIO_Port GPIOA
 
 /* USER CODE BEGIN Private defines */
 
