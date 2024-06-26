@@ -33,6 +33,8 @@
  */
 #include <stddef.h>
 
+extern void trace_on(int tag);
+extern void trace_off(int tag);
 /*
  * If stdint.h cannot be located then:
  *   + If using GCC ensure the -nostdint options is *not* being used.
@@ -304,7 +306,7 @@ extern "C" {
 #ifndef traceTASK_SWITCHED_IN
 	/* Called after a task has been selected to run.  pxCurrentTCB holds a pointer
 	to the task control block of the selected task. */
-	#define traceTASK_SWITCHED_IN()
+	#define traceTASK_SWITCHED_IN() trace_on((int)pxCurrentTCB->pxTaskTag)
 #endif
 
 #ifndef traceINCREASE_TICK_COUNT
@@ -326,7 +328,7 @@ extern "C" {
 #ifndef traceTASK_SWITCHED_OUT
 	/* Called before a task has been selected to run.  pxCurrentTCB holds a pointer
 	to the task control block of the task being switched out. */
-	#define traceTASK_SWITCHED_OUT()
+	#define traceTASK_SWITCHED_OUT() trace_off((int)pxCurrentTCB->pxTaskTag)
 #endif
 
 #ifndef traceTASK_PRIORITY_INHERIT

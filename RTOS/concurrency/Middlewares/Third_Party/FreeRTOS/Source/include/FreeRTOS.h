@@ -30,6 +30,16 @@
 
 extern void trace_on(int tag);
 extern void trace_off(int tag);
+
+#ifndef traceTASK_SWITCHED_IN
+	#define traceTASK_SWITCHED_IN()
+	//  trace_on((int)pxCurrentTCB->pxTaskTag)
+#endif
+#ifndef traceTASK_SWITCHED_OUT
+	#define traceTASK_SWITCHED_OUT()
+	//  trace_off((int)pxCurrentTCB->pxTaskTag)
+#endif
+
 /*
  * Include the generic headers required for the FreeRTOS port being used.
  */
@@ -303,11 +313,6 @@ extern "C" {
 	#define traceEND()
 #endif
 
-#ifndef traceTASK_SWITCHED_IN
-	/* Called after a task has been selected to run.  pxCurrentTCB holds a pointer
-	to the task control block of the selected task. */
-	#define traceTASK_SWITCHED_IN() trace_on((int)pxCurrentTCB->pxTaskTag)
-#endif
 
 #ifndef traceINCREASE_TICK_COUNT
 	/* Called before stepping the tick count after waking from tickless idle
@@ -325,11 +330,6 @@ extern "C" {
 	#define traceLOW_POWER_IDLE_END()
 #endif
 
-#ifndef traceTASK_SWITCHED_OUT
-	/* Called before a task has been selected to run.  pxCurrentTCB holds a pointer
-	to the task control block of the task being switched out. */
-	#define traceTASK_SWITCHED_OUT() trace_off((int)pxCurrentTCB->pxTaskTag)
-#endif
 
 #ifndef traceTASK_PRIORITY_INHERIT
 	/* Called when a task attempts to take a mutex that is already held by a

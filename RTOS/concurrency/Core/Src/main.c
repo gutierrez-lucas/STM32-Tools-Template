@@ -38,6 +38,17 @@ int _write(int file, char *data, int len){
 		 return (status == HAL_OK ? len : 0);
 }
 
+static void change_adc_channel(uint32_t channel){
+	ADC_ChannelConfTypeDef sConfig = {0};
+
+	sConfig.Channel = channel;
+	sConfig.Rank = ADC_REGULAR_RANK_1;
+	sConfig.SamplingTime = ADC_SAMPLETIME_1CYCLE_5;
+	if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK){
+			Error_Handler();
+	}
+}
+
 void trace_toggle(int tag){
 	if(tag == 1){
 		HAL_GPIO_TogglePin(trace_1_GPIO_Port, trace_1_Pin);
@@ -45,6 +56,8 @@ void trace_toggle(int tag){
 		HAL_GPIO_TogglePin(trace_2_GPIO_Port, trace_2_Pin);
 	}else if(tag == 3){
 		HAL_GPIO_TogglePin(trace_3_GPIO_Port, trace_3_Pin);
+	}else{
+		return;
 	}
 }
 
@@ -55,6 +68,8 @@ void trace_on(int tag){
 		HAL_GPIO_WritePin(trace_2_GPIO_Port, trace_2_Pin, GPIO_PIN_SET);
 	}else if(tag == 3){
 		HAL_GPIO_WritePin(trace_3_GPIO_Port, trace_3_Pin, GPIO_PIN_SET);
+	}else{
+		return;
 	}
 }
 
@@ -65,13 +80,17 @@ void trace_off(int tag){
 		HAL_GPIO_WritePin(trace_2_GPIO_Port, trace_2_Pin, GPIO_PIN_RESET);
 	}else if(tag == 3){
 		HAL_GPIO_WritePin(trace_3_GPIO_Port, trace_3_Pin, GPIO_PIN_RESET);
+	}else{
+		return;
 	}
 }
 
 void display_task(void *pvParameters);
 void button_task(void *pvParameters);
+void conversion_task(void *pvParameters);
 xTaskHandle xButton_task_handle = NULL;
 xTaskHandle xDisplay_task_handle = NULL;
+xTaskHandle xConversion_task_handle = NULL;
 
 void SystemClock_Config(void);
 
@@ -82,6 +101,12 @@ static void MX_TIM2_Init(void);
 static void MX_USART1_UART_Init(void);
 
 QueueHandle_t button_queue;
+QueueHandle_t conversion_queue;
+
+typedef struct {
+	uint32_t x;
+	uint32_t y;
+} adc_t;
 
 bool block = true;
 
@@ -99,18 +124,18 @@ int main(void)
 
 	printf("\r\n\r\nDisplay Test\r\n");
 
-	button_queue = xQueueCreate(20, sizeof(button_t));
+	button_queue = xQueueCreate(20, sizeof(char));
+	conversion_queue = xQueueCreate(20, sizeof(adc_t));
 
 	xTaskCreate(display_task, "display_task", 128, NULL, tskIDLE_PRIORITY+2, &xDisplay_task_handle);
 	xTaskCreate(button_task, "button_task", 128, NULL, tskIDLE_PRIORITY+1, &xButton_task_handle);
+	xTaskCreate(conversion_task, "conversion_task", 128, NULL, tskIDLE_PRIORITY+2, &xConversion_task_handle);
 
 	vTaskSetApplicationTaskTag( xDisplay_task_handle, ( void * ) 1 );
 	vTaskSetApplicationTaskTag( xButton_task_handle, ( void * ) 2 );
+	vTaskSetApplicationTaskTag( xConversion_task_handle, ( void * ) 4 );
 
 	HAL_NVIC_EnableIRQ(TIM2_IRQn);
-	HAL_TIM_Base_Start_IT(&htim2);
-	HAL_ADC_Start_IT(&hadc1);
-	// HAL_Delay(1000);
 
 	vTaskStartScheduler();
 
@@ -129,7 +154,10 @@ void display_task(void *pvParameters){
 
 	static int connected = 0;
 
-	button_t button_res = 0;	
+	char button_res;	
+	adc_t adc_res;
+	char aux[10];
+
 	uint8_t position_x = 10;
 	uint8_t position_y = 10;
 
@@ -145,67 +173,50 @@ void display_task(void *pvParameters){
 
 				SSD1306_Clear();
 				vTaskPrioritySet(xButton_task_handle, tskIDLE_PRIORITY+3);
-				// xTaskNotifyGive(xButton_task_handle);
-				xTaskNotify(xButton_task_handle, 0xffff, eSetValueWithOverwrite); 
+				xTaskNotifyGive(xButton_task_handle);
+				xTaskNotifyGive(xConversion_task_handle);
 			}
 		}else{
-			xQueueReceive(button_queue, &button_res, 0);
-			while(button_res != 0){
-				SSD1306_GotoXY (position_x,position_y); 
-				switch(button_res){
-					case(LEFT):
-						printf("Button left pressed \r\n");
-						SSD1306_Puts ("L", &Font_11x18, 1); 
-						break;
-					case(RIGHT):
-						printf("Button right pressed \r\n");
-						SSD1306_Puts ("R", &Font_11x18, 1);
-						break;
-					case(UP):
-						printf("Button up pressed \r\n");
-						SSD1306_Puts ("U", &Font_11x18, 1); 
-						break;
-					case(DOWN):
-						printf("Button down pressed \r\n");
-						SSD1306_Puts ("D", &Font_11x18, 1); 
-						break;
-					default: break;
-				}
-				SSD1306_UpdateScreen(); 
-				if(position_x < 100){
-					position_x += 10;
-				}else{
-					position_x = 10;
-					position_y += 15;
-					if(position_y > 40){
-						position_y = 10;
-						SSD1306_Clear();
-					}
-				}
-				button_res = 0;
+			HAL_TIM_Base_Stop_IT(&htim2);
+			while(uxQueueMessagesWaiting(button_queue) != 0){
 				xQueueReceive(button_queue, &button_res, 0);
+				SSD1306_GotoXY (position_x,position_y); 
+				SSD1306_Putc (button_res, &Font_11x18, 1); 
+				SSD1306_UpdateScreen(); 
 			}
-		}
 		
+			while(uxQueueMessagesWaiting(conversion_queue) != 0){
+				xQueueReceive(conversion_queue, &adc_res, 0);
+
+				SSD1306_GotoXY (position_x,position_y+15); 
+				sprintf(aux, "%04d", adc_res.x);
+				SSD1306_Puts (aux, &Font_11x18, 1); 
+
+				SSD1306_GotoXY (position_x,position_y+30); 
+				sprintf(aux, "%04d", adc_res.y);
+				SSD1306_Puts (aux, &Font_11x18, 1); 
+
+				SSD1306_UpdateScreen(); 
+			}
+			HAL_TIM_Base_Start_IT(&htim2);
+		}
 		vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(150));
 	}
 	printf("Destroying Display task 1 \r\n");
 	vTaskDelete(xDisplay_task_handle);
+
 }
 
 void button_task(void *pvParameters){
 	uint8_t counter = 0;
 
-	printf("Button WaterMark at the beggining: %d words\r\n", uxTaskGetStackHighWaterMark(NULL));
+	// printf("Button WaterMark at the beggining: %d words\r\n", uxTaskGetStackHighWaterMark(NULL));
 	printf("Button task started, waiting for display ready\r\n");
-	// ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-	uint32_t notification_message = 42;
-	xTaskNotifyWait(0, 0, &notification_message, portMAX_DELAY);
 
-	printf("Display ready, starting button task, message: 0x%04X\r\n", notification_message);
+	ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
 	uint8_t button_left_var = 0, button_right_var = 0, button_up_var = 0, button_down_var = 0;
-	button_t current_button = UNPRESS;
+	char current_button;
 
 	while(1){
 		// HAL_GPIO_TogglePin(sec_led_GPIO_Port, sec_led_Pin);
@@ -213,7 +224,7 @@ void button_task(void *pvParameters){
 		if(button_left_var == 1){
 			if(HAL_GPIO_ReadPin(button_l_GPIO_Port, button_l_Pin) == GPIO_PIN_SET){
 				button_left_var = 0;
-				current_button = LEFT;
+				current_button = 'L';
 				xQueueSend(button_queue, &current_button, 0);
 			}
 		}else{
@@ -225,7 +236,7 @@ void button_task(void *pvParameters){
 		if(button_right_var == 1){
 			if(HAL_GPIO_ReadPin(button_r_GPIO_Port, button_r_Pin) == GPIO_PIN_SET){
 				button_right_var = 0;
-				current_button = RIGHT;
+				current_button = 'R';
 				xQueueSend(button_queue, &current_button, 0);
 			}
 		}else{
@@ -237,7 +248,7 @@ void button_task(void *pvParameters){
 		if(button_up_var == 1){
 			if(HAL_GPIO_ReadPin(button_u_GPIO_Port, button_u_Pin) == GPIO_PIN_SET){
 				button_up_var = 0;
-				current_button = UP;
+				current_button = 'U';
 				xQueueSend(button_queue, &current_button, 0);
 			}
 		}else{
@@ -249,7 +260,7 @@ void button_task(void *pvParameters){
 		if(button_down_var == 1){
 			if(HAL_GPIO_ReadPin(button_d_GPIO_Port, button_d_Pin) == GPIO_PIN_SET){
 				button_down_var = 0;
-				current_button = DOWN;
+				current_button = 'D';
 				xQueueSend(button_queue, &current_button, 0);
 			}
 		}else{
@@ -264,43 +275,56 @@ void button_task(void *pvParameters){
 	vTaskDelete(xButton_task_handle);
 }
 
-void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
-{
+void conversion_task(void *pvParameters){
+
+	uint16_t counter = 0;
+	adc_t adc_out;
+	uint32_t adc1 = 0;
+	uint32_t adc2 = 0;
+
+	printf("Conversion task,, waiting for display ready\r\n");
+
+	ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+
+	printf("Ready, activating timer\r\n");
+
+	HAL_TIM_Base_Start_IT(&htim2);
+
+	while(1){
+		ulTaskNotifyTake(pdFALSE, portMAX_DELAY);
+		
+		HAL_ADC_Start_IT(&hadc1);
+		xTaskNotifyWait(0, 0, &adc1, portMAX_DELAY);
+
+		change_adc_channel(ADC_CHANNEL_7);
+		HAL_ADC_Start_IT(&hadc1);
+		xTaskNotifyWait(0, 0, &adc2, portMAX_DELAY);
+
+		change_adc_channel(ADC_CHANNEL_6);
+
+		if( counter++ == 3000){
+			adc_out.x = adc1;
+			adc_out.y = adc2;
+			counter = 0;
+			xQueueSend(conversion_queue, &adc_out, 0);
+		}
+	}
+}
+
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim){
+	BaseType_t xHigherPriorityTaskWoken = pdTRUE;
 	if (htim->Instance == TIM1) {
 		HAL_IncTick();
 	}else if (htim->Instance == TIM2) {
 		trace_toggle(3);
-		HAL_ADC_Start_IT(&hadc1);
+		vTaskNotifyGiveFromISR(xConversion_task_handle, &xHigherPriorityTaskWoken);
 	}
 }
 
-static void change_adc_channel(uint32_t channel){
-	ADC_ChannelConfTypeDef sConfig = {0};
-
-	sConfig.Channel = channel;
-	sConfig.Rank = ADC_REGULAR_RANK_1;
-	sConfig.SamplingTime = ADC_SAMPLETIME_1CYCLE_5;
-	if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK){
-			Error_Handler();
-	}
-}
 
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc){
-	static uint32_t current_channel = ADC_CHANNEL_6;
-	if( current_channel == ADC_CHANNEL_6 ){
-		printf("ADC_6: %d\r\n", HAL_ADC_GetValue(&hadc1)); // Read & Update The ADC Result
-		// ad_res1 = HAL_ADC_GetValue(&hadc1); // Read & Update The ADC Result
-		current_channel = ADC_CHANNEL_7;
-	}else if(current_channel == ADC_CHANNEL_7){
-		printf("ADC_7: %d\r\n", HAL_ADC_GetValue(&hadc1)); // Read & Update The ADC Result
-		// ad_res2 = HAL_ADC_GetValue(&hadc1); // Read & Update The ADC Result
-		current_channel = ADC_CHANNEL_6;
-	}
-	change_adc_channel(current_channel);
-}
-
-void HAL_ADCEx_InjectedConvCpltCallback(ADC_HandleTypeDef* AdcHandle){
-	printf("ADC inj: %d\r\n", HAL_ADC_GetValue(HAL_ADCEx_InjectedGetValue(&hadc1, ADC_INJECTED_RANK_1)));  
+	BaseType_t xHigherPriorityTaskWoken = pdTRUE;
+	xTaskNotifyFromISR(xConversion_task_handle,(uint32_t)HAL_ADC_GetValue(&hadc1), eSetValueWithOverwrite, &xHigherPriorityTaskWoken); 
 }
 
 void SystemClock_Config(void)
@@ -357,11 +381,9 @@ static void MX_ADC1_Init(void)
 		Error_Handler();
 	}
 
-  /** Configure Regular Channel
-  */
 	sConfig.Channel = ADC_CHANNEL_6;
 	sConfig.Rank = 1;
-	sConfig.SamplingTime = ADC_SAMPLETIME_239CYCLES_5;
+	// sConfig.SamplingTime = ADC_SAMPLETIME_28CYCLES_5;
 	if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
 	{
 		Error_Handler();

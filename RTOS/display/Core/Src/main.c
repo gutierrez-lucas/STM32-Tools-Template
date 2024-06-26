@@ -104,6 +104,10 @@ int main(void)
 
 void display_task(void *pvParameters){
 
+    UBaseType_t uxHighWaterMark;
+
+	uxHighWaterMark = uxTaskGetStackHighWaterMark( NULL );
+	printf("Display WaterMark at the beggining: %d words\r\n", uxHighWaterMark);
 	TickType_t xLastWakeTime = xTaskGetTickCount();
 
 	static int connected = 0;
@@ -125,7 +129,7 @@ void display_task(void *pvParameters){
 				SSD1306_Clear();
 				vTaskPrioritySet(xButton_task_handle, tskIDLE_PRIORITY+3);
 				// xTaskNotifyGive(xButton_task_handle);
-				xTaskNotify(xButton_task_handle, 0xffff, eSetValueWithOverwrite);
+				xTaskNotify(xButton_task_handle, 0xffff, eSetValueWithOverwrite); 
 			}
 		}else{
 			xQueueReceive(button_queue, &button_res, 0);
@@ -148,7 +152,6 @@ void display_task(void *pvParameters){
 						printf("Button down pressed \r\n");
 						SSD1306_Puts ("D", &Font_11x18, 1); 
 						break;
-						
 					default: break;
 				}
 				SSD1306_UpdateScreen(); 
@@ -166,14 +169,17 @@ void display_task(void *pvParameters){
 				xQueueReceive(button_queue, &button_res, 0);
 			}
 		}
-		vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(500));
+		
+		vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(150));
 	}
 	printf("Destroying Display task 1 \r\n");
 	vTaskDelete(xDisplay_task_handle);
 }
 
 void button_task(void *pvParameters){
+	uint8_t counter = 0;
 
+	printf("Button WaterMark at the beggining: %d words\r\n", uxTaskGetStackHighWaterMark(NULL));
 	printf("Button task started, waiting for display ready\r\n");
 	// ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 	uint32_t notification_message = 42;
@@ -234,8 +240,12 @@ void button_task(void *pvParameters){
 				button_down_var = 1;
 			}
 		}
-	
-		vTaskDelay(50/ portTICK_PERIOD_MS);
+
+		// if(counter++ > 10){
+		// 	counter = 0;
+		// 	printf("Button WaterMark at running: %d words\r\n", uxTaskGetStackHighWaterMark(NULL));
+		// }	
+		vTaskDelay(100/ portTICK_PERIOD_MS);
 	}
 	printf("Destroying Button task \r\n");
 	vTaskDelete(xButton_task_handle);
