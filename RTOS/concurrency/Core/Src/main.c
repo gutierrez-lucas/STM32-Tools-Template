@@ -49,6 +49,14 @@ static void change_adc_channel(uint32_t channel){
 	}
 }
 
+void vApplicationStackOverflowHook(xTaskHandle xTask, signed char *pcTaskName){
+	// printf("Stack Overflow inminent\r\n");
+}
+
+void warn_stakoverflow(void){
+	printf("Stack Overflow inminent\r\n");
+}
+
 void trace_toggle(int tag){
 	if(tag == 1){
 		HAL_GPIO_TogglePin(trace_1_GPIO_Port, trace_1_Pin);
@@ -127,7 +135,7 @@ int main(void)
 	button_queue = xQueueCreate(20, sizeof(char));
 	conversion_queue = xQueueCreate(20, sizeof(adc_t));
 
-	xTaskCreate(display_task, "display_task", 128, NULL, tskIDLE_PRIORITY+2, &xDisplay_task_handle);
+	xTaskCreate(display_task, "display_task", 230, NULL, tskIDLE_PRIORITY+2, &xDisplay_task_handle);
 	xTaskCreate(button_task, "button_task", 128, NULL, tskIDLE_PRIORITY+1, &xButton_task_handle);
 	xTaskCreate(conversion_task, "conversion_task", 128, NULL, tskIDLE_PRIORITY+2, &xConversion_task_handle);
 
@@ -143,16 +151,26 @@ int main(void)
 	}
 }
 
+UBaseType_t task_watermark;
+uint32_t counter = 0;
+
+void funct(uint32_t n){
+	uint32_t i[n];
+	for(uint32_t j = 0; j < n; j++){
+		i[j] = j;
+	}
+}
 
 void display_task(void *pvParameters){
 
-	UBaseType_t uxHighWaterMark;
+	// printf("Display WaterMark at the beggining: %d words\r\n", (UBaseType_t)uxTaskGetStackHighWaterMark(xDisplay_task_handle));
 
-	uxHighWaterMark = uxTaskGetStackHighWaterMark( NULL );
-	printf("Display WaterMark at the beggining: %d words\r\n", uxHighWaterMark);
 	TickType_t xLastWakeTime = xTaskGetTickCount();
 
 	static int connected = 0;
+
+	// uint32_t *inter = (uint32_t)malloc(sizeof(uint32_t));
+	// *(inter) = 0;
 
 	char button_res;	
 	adc_t adc_res;
@@ -196,21 +214,26 @@ void display_task(void *pvParameters){
 				sprintf(aux, "%04d", adc_res.y);
 				SSD1306_Puts (aux, &Font_11x18, 1); 
 
+
 				SSD1306_UpdateScreen(); 
 			}
 			HAL_TIM_Base_Start_IT(&htim2);
 		}
-		vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(150));
+		// ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+		task_watermark = uxTaskGetStackHighWaterMark(xDisplay_task_handle);
+		// counter++;
+		// funct(counter);
+		// realloc(inter, sizeof(counter*sizeof(uint32_t)));
+		// *(inter+counter) = task_watermark;
+		vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(200));
 	}
 	printf("Destroying Display task 1 \r\n");
 	vTaskDelete(xDisplay_task_handle);
-
 }
 
 void button_task(void *pvParameters){
-	uint8_t counter = 0;
 
-	// printf("Button WaterMark at the beggining: %d words\r\n", uxTaskGetStackHighWaterMark(NULL));
+	printf("Button WaterMark at the beggining: %d words\r\n", uxTaskGetStackHighWaterMark(NULL));
 	printf("Button task started, waiting for display ready\r\n");
 
 	ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
@@ -219,7 +242,6 @@ void button_task(void *pvParameters){
 	char current_button;
 
 	while(1){
-		// HAL_GPIO_TogglePin(sec_led_GPIO_Port, sec_led_Pin);
 
 		if(button_left_var == 1){
 			if(HAL_GPIO_ReadPin(button_l_GPIO_Port, button_l_Pin) == GPIO_PIN_SET){

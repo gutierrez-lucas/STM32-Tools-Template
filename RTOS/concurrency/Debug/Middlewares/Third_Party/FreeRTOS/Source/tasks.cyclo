@@ -26,7 +26,7 @@
 ../Middlewares/Third_Party/FreeRTOS/Source/tasks.c:2757:7:vTaskSetApplicationTaskTag	2
 ../Middlewares/Third_Party/FreeRTOS/Source/tasks.c:2784:21:xTaskGetApplicationTaskTag	2
 ../Middlewares/Third_Party/FreeRTOS/Source/tasks.c:2815:13:xTaskCallApplicationTaskHook	3
-../Middlewares/Third_Party/FreeRTOS/Source/tasks.c:2845:6:vTaskSwitchContext	6
+../Middlewares/Third_Party/FreeRTOS/Source/tasks.c:2845:6:vTaskSwitchContext	9
 ../Middlewares/Third_Party/FreeRTOS/Source/tasks.c:2904:6:vTaskPlaceOnEventList	2
 ../Middlewares/Third_Party/FreeRTOS/Source/tasks.c:2921:6:vTaskPlaceOnUnorderedEventList	3
 ../Middlewares/Third_Party/FreeRTOS/Source/tasks.c:2978:12:xTaskRemoveFromEventList	4
