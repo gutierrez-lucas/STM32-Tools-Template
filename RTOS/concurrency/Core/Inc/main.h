@@ -65,19 +65,18 @@ void Error_Handler(void);
 #define trace_1_GPIO_Port GPIOA
 #define trace_2_Pin GPIO_PIN_10
 #define trace_2_GPIO_Port GPIOA
-#define trace_3_Pin GPIO_PIN_4
+#define trace_3_Pin GPIO_PIN_15
 #define trace_3_GPIO_Port GPIOB
+#define trace_4_Pin GPIO_PIN_8
+#define trace_4_GPIO_Port GPIOA
+#define trace_5_Pin GPIO_PIN_11
+#define trace_5_GPIO_Port GPIOA
 
-/* USER CODE BEGIN Private defines */
-#define button_r_Pin GPIO_PIN_5
-#define button_r_GPIO_Port GPIOB
-#define button_l_Pin GPIO_PIN_15
-#define button_l_GPIO_Port GPIOA
-#define button_u_Pin GPIO_PIN_11
-#define button_u_GPIO_Port GPIOA
-#define button_d_Pin GPIO_PIN_8
-#define button_d_GPIO_Port GPIOA
-
+#define TRACE_IDLE 0 
+#define TRACE_ADC 1
+#define TRACE_PRINT 2
+#define TRACE_PRINT_ADQ 4
+#define TRACE_PRINT_FULL_PROCESS 5
 /* USER CODE END Private defines */
 
 

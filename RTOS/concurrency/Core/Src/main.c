@@ -7,23 +7,14 @@
 #include "semphr.h"
 #include "event_groups.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <errno.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <sys/unistd.h> // STDOUT_FILENO, STDERR_FILENO
 
-#include "../display/ssd1306.h"
 
-typedef enum {
-	LEFT = 1,
-	RIGHT = 2,
-	UP = 4,
-	DOWN = 5,
-	UNPRESS = 0
-} button_t;
-
-I2C_HandleTypeDef hi2c2;
 UART_HandleTypeDef huart1;
 ADC_HandleTypeDef hadc1;
 TIM_HandleTypeDef htim2;
@@ -36,17 +27,6 @@ int _write(int file, char *data, int len){
 		 HAL_StatusTypeDef status = HAL_UART_Transmit(&huart1, (uint8_t*)data, len, 1000);
 
 		 return (status == HAL_OK ? len : 0);
-}
-
-static void change_adc_channel(uint32_t channel){
-	ADC_ChannelConfTypeDef sConfig = {0};
-
-	sConfig.Channel = channel;
-	sConfig.Rank = ADC_REGULAR_RANK_1;
-	sConfig.SamplingTime = ADC_SAMPLETIME_1CYCLE_5;
-	if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK){
-			Error_Handler();
-	}
 }
 
 void vApplicationStackOverflowHook(xTaskHandle xTask, signed char *pcTaskName){
@@ -62,8 +42,12 @@ void trace_toggle(int tag){
 		HAL_GPIO_TogglePin(trace_1_GPIO_Port, trace_1_Pin);
 	}else if(tag == 2){
 		HAL_GPIO_TogglePin(trace_2_GPIO_Port, trace_2_Pin);
-	}else if(tag == 3){
+	}else if(tag == 0){ // IDLE
 		HAL_GPIO_TogglePin(trace_3_GPIO_Port, trace_3_Pin);
+	}else if(tag == 4){
+		HAL_GPIO_TogglePin(trace_4_GPIO_Port, trace_4_Pin);
+	}else if(tag == 5){
+		HAL_GPIO_TogglePin(trace_5_GPIO_Port, trace_5_Pin);
 	}else{
 		return;
 	}
@@ -74,8 +58,12 @@ void trace_on(int tag){
 		HAL_GPIO_WritePin(trace_1_GPIO_Port, trace_1_Pin, GPIO_PIN_SET);
 	}else if(tag == 2){
 		HAL_GPIO_WritePin(trace_2_GPIO_Port, trace_2_Pin, GPIO_PIN_SET);
-	}else if(tag == 3){
+	}else if(tag == 0){
 		HAL_GPIO_WritePin(trace_3_GPIO_Port, trace_3_Pin, GPIO_PIN_SET);
+	}else if(tag == 4){
+		HAL_GPIO_WritePin(trace_4_GPIO_Port, trace_4_Pin, GPIO_PIN_SET);
+	}else if(tag == 5){
+		HAL_GPIO_WritePin(trace_5_GPIO_Port, trace_5_Pin, GPIO_PIN_SET);
 	}else{
 		return;
 	}
@@ -86,64 +74,52 @@ void trace_off(int tag){
 		HAL_GPIO_WritePin(trace_1_GPIO_Port, trace_1_Pin, GPIO_PIN_RESET);
 	}else if(tag == 2){
 		HAL_GPIO_WritePin(trace_2_GPIO_Port, trace_2_Pin, GPIO_PIN_RESET);
-	}else if(tag == 3){
+	}else if(tag == 0){
 		HAL_GPIO_WritePin(trace_3_GPIO_Port, trace_3_Pin, GPIO_PIN_RESET);
+	}else if(tag == 4){
+		HAL_GPIO_WritePin(trace_4_GPIO_Port, trace_4_Pin, GPIO_PIN_RESET);
+	}else if(tag == 5){
+		HAL_GPIO_WritePin(trace_5_GPIO_Port, trace_5_Pin, GPIO_PIN_RESET);
 	}else{
 		return;
 	}
 }
 
-void display_task(void *pvParameters);
-void button_task(void *pvParameters);
-void conversion_task(void *pvParameters);
-xTaskHandle xButton_task_handle = NULL;
-xTaskHandle xDisplay_task_handle = NULL;
-xTaskHandle xConversion_task_handle = NULL;
+void adc_task(void *pvParameters);
+void print_task(void *pvParameters);
+xTaskHandle adc_task_handle = NULL;
+xTaskHandle print_task_handle = NULL;
 
 void SystemClock_Config(void);
 
 static void MX_GPIO_Init(void);
-static void MX_I2C2_Init(void);
 static void MX_ADC1_Init(void);
-static void MX_TIM2_Init(void);
+// static void MX_TIM2_Init(void);
 static void MX_USART1_UART_Init(void);
 
-QueueHandle_t button_queue;
-QueueHandle_t conversion_queue;
+QueueHandle_t adc_queue;
 
-typedef struct {
-	uint32_t x;
-	uint32_t y;
-} adc_t;
-
-bool block = true;
+#define BUFFER_SIZE 200
 
 int main(void)
 {
-
 	HAL_Init();
 	SystemClock_Config();
 
 	MX_GPIO_Init();
-	MX_I2C2_Init();
 	MX_USART1_UART_Init();
-	MX_TIM2_Init();
+	// MX_TIM2_Init();
 	MX_ADC1_Init();
 
-	printf("\r\n\r\nDisplay Test\r\n");
+	printf("\r\n\r\nACD system\r\n");
 
-	button_queue = xQueueCreate(20, sizeof(char));
-	conversion_queue = xQueueCreate(20, sizeof(adc_t));
+	adc_queue = xQueueCreate(BUFFER_SIZE+100, sizeof(uint16_t));
 
-	xTaskCreate(display_task, "display_task", 230, NULL, tskIDLE_PRIORITY+2, &xDisplay_task_handle);
-	xTaskCreate(button_task, "button_task", 128, NULL, tskIDLE_PRIORITY+1, &xButton_task_handle);
-	xTaskCreate(conversion_task, "conversion_task", 128, NULL, tskIDLE_PRIORITY+2, &xConversion_task_handle);
+	xTaskCreate(adc_task, "adc_task", 128, NULL, tskIDLE_PRIORITY+2, &adc_task_handle);
+	xTaskCreate(print_task, "print_task", 230, NULL, tskIDLE_PRIORITY+1, &print_task_handle);
 
-	vTaskSetApplicationTaskTag( xDisplay_task_handle, ( void * ) 1 );
-	vTaskSetApplicationTaskTag( xButton_task_handle, ( void * ) 2 );
-	vTaskSetApplicationTaskTag( xConversion_task_handle, ( void * ) 4 );
-
-	HAL_NVIC_EnableIRQ(TIM2_IRQn);
+	vTaskSetApplicationTaskTag( print_task_handle, ( void * ) TRACE_PRINT );
+	vTaskSetApplicationTaskTag( adc_task_handle, ( void * ) TRACE_ADC );
 
 	vTaskStartScheduler();
 
@@ -151,206 +127,81 @@ int main(void)
 	}
 }
 
+uint8_t max_queue_stored = 0;
 UBaseType_t task_watermark;
-uint32_t counter = 0;
 
-void funct(uint32_t n){
-	uint32_t i[n];
-	for(uint32_t j = 0; j < n; j++){
-		i[j] = j;
-	}
-}
+void print_task(void *pvParameters){
+	printf("PRINT task\r\n");
 
-void display_task(void *pvParameters){
-
-	// printf("Display WaterMark at the beggining: %d words\r\n", (UBaseType_t)uxTaskGetStackHighWaterMark(xDisplay_task_handle));
-
-	TickType_t xLastWakeTime = xTaskGetTickCount();
-
-	static int connected = 0;
-
-	// uint32_t *inter = (uint32_t)malloc(sizeof(uint32_t));
-	// *(inter) = 0;
-
-	char button_res;	
-	adc_t adc_res;
-	char aux[10];
-
-	uint8_t position_x = 10;
-	uint8_t position_y = 10;
+	char str_buffer[10];
+	uint32_t acumulator = 0;
+	uint16_t adc_buffer[BUFFER_SIZE];
+	uint8_t counter = 0, i = 0;
 
 	while(1){
-		if(connected == 0){
-			HAL_StatusTypeDef res = SSD1306_Init(0x78); 
-			if( res != HAL_OK){
-				printf("Display connection err: %d\r\n", res);
-			}else{
-				HAL_GPIO_WritePin(main_led_GPIO_Port, main_led_Pin, SET);
-				connected = 1;
-				printf("Display connected.\r\n" );
-
-				SSD1306_Clear();
-				vTaskPrioritySet(xButton_task_handle, tskIDLE_PRIORITY+3);
-				xTaskNotifyGive(xButton_task_handle);
-				xTaskNotifyGive(xConversion_task_handle);
-			}
-		}else{
-			HAL_TIM_Base_Stop_IT(&htim2);
-			while(uxQueueMessagesWaiting(button_queue) != 0){
-				xQueueReceive(button_queue, &button_res, 0);
-				SSD1306_GotoXY (position_x,position_y); 
-				SSD1306_Putc (button_res, &Font_11x18, 1); 
-				SSD1306_UpdateScreen(); 
-			}
-		
-			while(uxQueueMessagesWaiting(conversion_queue) != 0){
-				xQueueReceive(conversion_queue, &adc_res, 0);
-
-				SSD1306_GotoXY (position_x,position_y+15); 
-				sprintf(aux, "%04d", adc_res.x);
-				SSD1306_Puts (aux, &Font_11x18, 1); 
-
-				SSD1306_GotoXY (position_x,position_y+30); 
-				sprintf(aux, "%04d", adc_res.y);
-				SSD1306_Puts (aux, &Font_11x18, 1); 
-
-
-				SSD1306_UpdateScreen(); 
-			}
-			HAL_TIM_Base_Start_IT(&htim2);
-		}
-		// ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-		task_watermark = uxTaskGetStackHighWaterMark(xDisplay_task_handle);
-		// counter++;
-		// funct(counter);
-		// realloc(inter, sizeof(counter*sizeof(uint32_t)));
-		// *(inter+counter) = task_watermark;
-		vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(200));
-	}
-	printf("Destroying Display task 1 \r\n");
-	vTaskDelete(xDisplay_task_handle);
-}
-
-void button_task(void *pvParameters){
-
-	printf("Button WaterMark at the beggining: %d words\r\n", uxTaskGetStackHighWaterMark(NULL));
-	printf("Button task started, waiting for display ready\r\n");
-
-	ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-
-	uint8_t button_left_var = 0, button_right_var = 0, button_up_var = 0, button_down_var = 0;
-	char current_button;
-
-	while(1){
-
-		if(button_left_var == 1){
-			if(HAL_GPIO_ReadPin(button_l_GPIO_Port, button_l_Pin) == GPIO_PIN_SET){
-				button_left_var = 0;
-				current_button = 'L';
-				xQueueSend(button_queue, &current_button, 0);
-			}
-		}else{
-			if(HAL_GPIO_ReadPin(button_l_GPIO_Port, button_l_Pin) == GPIO_PIN_RESET){
-				button_left_var = 1;
+		while( uxQueueMessagesWaiting(adc_queue) != 0 && counter < BUFFER_SIZE ){
+			if( xQueueReceive(adc_queue, &adc_buffer+counter, 0) == pdTRUE ){
+				counter++;
 			}
 		}
-
-		if(button_right_var == 1){
-			if(HAL_GPIO_ReadPin(button_r_GPIO_Port, button_r_Pin) == GPIO_PIN_SET){
-				button_right_var = 0;
-				current_button = 'R';
-				xQueueSend(button_queue, &current_button, 0);
+		if( counter == BUFFER_SIZE ){
+			for(i = 0; i < counter; i++){
+				acumulator+=adc_buffer[i];
+				sprintf(str_buffer, "%05d\r\n", adc_buffer[i]);
+				printf("%s", str_buffer);
 			}
-		}else{
-			if(HAL_GPIO_ReadPin(button_r_GPIO_Port, button_r_Pin) == GPIO_PIN_RESET){
-				button_right_var = 1;
-			}
-		}
-
-		if(button_up_var == 1){
-			if(HAL_GPIO_ReadPin(button_u_GPIO_Port, button_u_Pin) == GPIO_PIN_SET){
-				button_up_var = 0;
-				current_button = 'U';
-				xQueueSend(button_queue, &current_button, 0);
-			}
-		}else{
-			if(HAL_GPIO_ReadPin(button_u_GPIO_Port, button_u_Pin) == GPIO_PIN_RESET){
-				button_up_var = 1;
-			}
-		}
-
-		if(button_down_var == 1){
-			if(HAL_GPIO_ReadPin(button_d_GPIO_Port, button_d_Pin) == GPIO_PIN_SET){
-				button_down_var = 0;
-				current_button = 'D';
-				xQueueSend(button_queue, &current_button, 0);
-			}
-		}else{
-			if(HAL_GPIO_ReadPin(button_d_GPIO_Port, button_d_Pin) == GPIO_PIN_RESET){
-				button_down_var = 1;
-			}
-		}
-
-		vTaskDelay(100/ portTICK_PERIOD_MS);
-	}
-	printf("Destroying Button task \r\n");
-	vTaskDelete(xButton_task_handle);
-}
-
-void conversion_task(void *pvParameters){
-
-	uint16_t counter = 0;
-	adc_t adc_out;
-	uint32_t adc1 = 0;
-	uint32_t adc2 = 0;
-
-	printf("Conversion task,, waiting for display ready\r\n");
-
-	ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-
-	printf("Ready, activating timer\r\n");
-
-	HAL_TIM_Base_Start_IT(&htim2);
-
-	while(1){
-		ulTaskNotifyTake(pdFALSE, portMAX_DELAY);
-		
-		HAL_ADC_Start_IT(&hadc1);
-		xTaskNotifyWait(0, 0, &adc1, portMAX_DELAY);
-
-		change_adc_channel(ADC_CHANNEL_7);
-		HAL_ADC_Start_IT(&hadc1);
-		xTaskNotifyWait(0, 0, &adc2, portMAX_DELAY);
-
-		change_adc_channel(ADC_CHANNEL_6);
-
-		if( counter++ == 3000){
-			adc_out.x = adc1;
-			adc_out.y = adc2;
+			acumulator/=BUFFER_SIZE;
+			sprintf(str_buffer, "%05d\r\n", acumulator);
+			printf("%s", str_buffer);
+			acumulator = 0;
 			counter = 0;
-			xQueueSend(conversion_queue, &adc_out, 0);
+			max_queue_stored = 0;
 		}
+		ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(50));
 	}
+	printf("Destroying print task \r\n");
+	vTaskDelete(print_task_handle);
+}
+
+
+void adc_task(void *pvParameters){
+	printf("ACD task\r\n");
+         
+	TickType_t xLastWakeTime;
+	uint16_t value;
+
+	while(1){
+		xLastWakeTime = xTaskGetTickCount();
+		HAL_ADC_Start(&hadc1);
+		HAL_ADC_PollForConversion(&hadc1, HAL_MAX_DELAY);
+		value = HAL_ADC_GetValue(&hadc1);
+		xQueueSend(adc_queue, (uint16_t*)&value, 0);
+		xTaskNotifyGive(print_task_handle);
+
+		max_queue_stored++;
+
+		vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(5));
+	}
+	printf("Destroying ADC task \r\n");
+	vTaskDelete(adc_task_handle);
 }
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim){
-	BaseType_t xHigherPriorityTaskWoken = pdTRUE;
+// 	BaseType_t xHigherPriorityTaskWoken = pdTRUE;
 	if (htim->Instance == TIM1) {
 		HAL_IncTick();
-	}else if (htim->Instance == TIM2) {
-		trace_toggle(3);
-		vTaskNotifyGiveFromISR(xConversion_task_handle, &xHigherPriorityTaskWoken);
+// 	}else if (htim->Instance == TIM2) {
+// 		trace_toggle(3);
+// 		vTaskNotifyGiveFromISR(xConversion_task_handle, &xHigherPriorityTaskWoken);
 	}
 }
 
+// void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc){
+// 	BaseType_t xHigherPriorityTaskWoken = pdTRUE;
+// 	xTaskNotifyFromISR(xConversion_task_handle,(uint32_t)HAL_ADC_GetValue(&hadc1), eSetValueWithOverwrite, &xHigherPriorityTaskWoken); 
+// }
 
-void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc){
-	BaseType_t xHigherPriorityTaskWoken = pdTRUE;
-	xTaskNotifyFromISR(xConversion_task_handle,(uint32_t)HAL_ADC_GetValue(&hadc1), eSetValueWithOverwrite, &xHigherPriorityTaskWoken); 
-}
-
-void SystemClock_Config(void)
-{
+void SystemClock_Config(void){
 	RCC_OscInitTypeDef RCC_OscInitStruct = {0};
 	RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
 	RCC_PeriphCLKInitTypeDef PeriphClkInit = {0};
@@ -378,22 +229,21 @@ void SystemClock_Config(void)
 	{
 		Error_Handler();
 	}
-	  PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_ADC;
-  PeriphClkInit.AdcClockSelection = RCC_ADCPCLK2_DIV2;
-  if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInit) != HAL_OK)
-  {
-	Error_Handler();
-  }
+	PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_ADC;
+	PeriphClkInit.AdcClockSelection = RCC_ADCPCLK2_DIV2;
+	if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInit) != HAL_OK)
+	{
+		Error_Handler();
+	}
 }
 
-static void MX_ADC1_Init(void)
-{
+static void MX_ADC1_Init(void){
 
 	ADC_ChannelConfTypeDef sConfig = {0};
 
 	hadc1.Instance = ADC1;
-	hadc1.Init.ScanConvMode = ADC_SCAN_DISABLE;
-	hadc1.Init.ContinuousConvMode = DISABLE;
+	hadc1.Init.ScanConvMode = ADC_SCAN_ENABLE;
+	hadc1.Init.ContinuousConvMode = ENABLE;
 	hadc1.Init.DiscontinuousConvMode = DISABLE;
 	hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
 	hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
@@ -410,72 +260,70 @@ static void MX_ADC1_Init(void)
 	{
 		Error_Handler();
 	}
-
 }
 
-static void MX_I2C2_Init(void)
-{
-	hi2c2.Instance = I2C2;
-	hi2c2.Init.ClockSpeed = 400000;
-	hi2c2.Init.DutyCycle = I2C_DUTYCYCLE_2;
-	hi2c2.Init.OwnAddress1 = 0;
-	hi2c2.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
-	hi2c2.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
-	hi2c2.Init.OwnAddress2 = 0;
-	hi2c2.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
-	hi2c2.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
-	if (HAL_I2C_Init(&hi2c2) != HAL_OK)
-	{
-		Error_Handler();
-	}
-}
+// static void MX_I2C2_Init(void){
+// 	hi2c2.Instance = I2C2;
+// 	hi2c2.Init.ClockSpeed = 400000;
+// 	hi2c2.Init.DutyCycle = I2C_DUTYCYCLE_2;
+// 	hi2c2.Init.OwnAddress1 = 0;
+// 	hi2c2.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
+// 	hi2c2.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
+// 	hi2c2.Init.OwnAddress2 = 0;
+// 	hi2c2.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
+// 	hi2c2.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
+// 	if (HAL_I2C_Init(&hi2c2) != HAL_OK)
+// 	{
+// 		Error_Handler();
+// 	}
+// }
 
 
-static void MX_TIM2_Init(void)
-{
+// static void MX_TIM2_Init(void)
+// {
 
-  /* USER CODE BEGIN TIM2_Init 0 */
+//   /* USER CODE BEGIN TIM2_Init 0 */
 
-  /* USER CODE END TIM2_Init 0 */
+//   /* USER CODE END TIM2_Init 0 */
 
-  TIM_SlaveConfigTypeDef sSlaveConfig = {0};
-  TIM_MasterConfigTypeDef sMasterConfig = {0};
+//   TIM_SlaveConfigTypeDef sSlaveConfig = {0};
+//   TIM_MasterConfigTypeDef sMasterConfig = {0};
 
-  /* USER CODE BEGIN TIM2_Init 1 */
+//   /* USER CODE BEGIN TIM2_Init 1 */
 
-  /* USER CODE END TIM2_Init 1 */
-  htim2.Instance = TIM2;
-  htim2.Init.Prescaler = 71;
-  htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim2.Init.Period = 60000;
-  htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
-  if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
-  {
-	Error_Handler();
-  }
-  sSlaveConfig.SlaveMode = TIM_SLAVEMODE_DISABLE;
-  sSlaveConfig.InputTrigger = TIM_TS_ITR1;
-  if (HAL_TIM_SlaveConfigSynchro(&htim2, &sSlaveConfig) != HAL_OK)
-  {
-	Error_Handler();
-  }
-  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
-  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
-  if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
-  {
-	Error_Handler();
-  }
-  /* USER CODE BEGIN TIM2_Init 2 */
+//   /* USER CODE END TIM2_Init 1 */
+//   htim2.Instance = TIM2;
+//   htim2.Init.Prescaler = 71;
+//   htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
+//   htim2.Init.Period = 60000;
+//   htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+//   htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
+//   if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
+//   {
+// 	Error_Handler();
+//   }
+//   sSlaveConfig.SlaveMode = TIM_SLAVEMODE_DISABLE;
+//   sSlaveConfig.InputTrigger = TIM_TS_ITR1;
+//   if (HAL_TIM_SlaveConfigSynchro(&htim2, &sSlaveConfig) != HAL_OK)
+//   {
+// 	Error_Handler();
+//   }
+//   sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+//   sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+//   if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
+//   {
+// 	Error_Handler();
+//   }
+//   /* USER CODE BEGIN TIM2_Init 2 */
 
-  /* USER CODE END TIM2_Init 2 */
+//   /* USER CODE END TIM2_Init 2 */
 
-}
+// }
 
 static void MX_USART1_UART_Init(void)
 {
 	huart1.Instance = USART1;
-	huart1.Init.BaudRate = 9600;
+	huart1.Init.BaudRate = 19200;
 	huart1.Init.WordLength = UART_WORDLENGTH_8B;
 	huart1.Init.StopBits = UART_STOPBITS_1;
 	huart1.Init.Parity = UART_PARITY_NONE;
@@ -491,29 +339,18 @@ static void MX_USART1_UART_Init(void)
 static void MX_GPIO_Init(void)
 {
   GPIO_InitTypeDef GPIO_InitStruct = {0};
-/* USER CODE BEGIN MX_GPIO_Init_1 */
-/* USER CODE END MX_GPIO_Init_1 */
 
-  /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOD_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
 
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, main_led_Pin|sec_led_Pin, GPIO_PIN_RESET);
-  GPIO_InitStruct.Pin = main_led_Pin|sec_led_Pin;
 
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  HAL_GPIO_WritePin(GPIOA, trace_1_Pin|trace_2_Pin|trace_4_Pin|trace_5_Pin, GPIO_PIN_RESET);
+  GPIO_InitStruct.Pin = trace_1_Pin|trace_2_Pin|trace_4_Pin|trace_5_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_OD;
   GPIO_InitStruct.Pull = GPIO_PULLDOWN;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
-
-//   HAL_GPIO_WritePin(GPIOB, display_reset_Pin, GPIO_PIN_SET);
-//   GPIO_InitStruct.Pin = display_reset_Pin;
-//   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-// //   GPIO_InitStruct.Pull = GPIO_PULLUP;
-//   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-//   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
   HAL_GPIO_WritePin(GPIOB, trace_3_Pin, GPIO_PIN_RESET);
   GPIO_InitStruct.Pin = trace_3_Pin;
@@ -522,26 +359,6 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-  HAL_GPIO_WritePin(GPIOA, trace_1_Pin|trace_2_Pin, GPIO_PIN_RESET);
-  GPIO_InitStruct.Pin = trace_1_Pin|trace_2_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_OD;
-  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-
-  GPIO_InitStruct.Pin = button_l_Pin|button_r_Pin|button_u_Pin|button_d_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-  GPIO_InitStruct.Pull = GPIO_PULLUP;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-
-  GPIO_InitStruct.Pin = button_r_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-  GPIO_InitStruct.Pull = GPIO_PULLUP;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
-/* USER CODE BEGIN MX_GPIO_Init_2 */
-/* USER CODE END MX_GPIO_Init_2 */
 }
 /**
   * @brief  This function is executed in case of error occurrence.

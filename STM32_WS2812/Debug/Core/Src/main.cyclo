@@ -1,0 +1,15 @@
+../Core/Src/main.c:21:6:rgb_matrix_clear_buffer	2
+../Core/Src/main.c:45:6:rgb_process_colors	11
+../Core/Src/main.c:66:6:rgb_process_rotation	5
+../Core/Src/main.c:88:10:rgb_matrix_set_pixel	9
+../Core/Src/main.c:133:6:matrix_test_secuential	3
+../Core/Src/main.c:150:6:matrix_draw_vertical_line	2
+../Core/Src/main.c:157:6:matrix_test_pyramid	4
+../Core/Src/main.c:191:6:matrix_test_vertical_levels	6
+../Core/Src/main.c:209:5:main	1
+../Core/Src/main.c:231:6:HAL_TIM_PWM_PulseFinishedCallback	1
+../Core/Src/main.c:238:6:SystemClock_Config	3
+../Core/Src/main.c:274:13:MX_TIM1_Init	7
+../Core/Src/main.c:343:13:MX_DMA_Init	1
+../Core/Src/main.c:360:13:MX_GPIO_Init	1
+../Core/Src/main.c:388:6:Error_Handler	1
